@@ -390,9 +390,11 @@ def strip_marked_block(html: str, start_marker: str, end_marker: str) -> str:
     Live-Verfolgung/Positions-Historie komplett aus der veröffentlichten
     Datei rauszuschneiden, nicht nur zu verstecken."""
     pattern = re.compile(
-        r"(<!--\s*" + re.escape(start_marker) + r"\s*-->|//\s*" + re.escape(start_marker) + r")"
+        r"(<!--\s*" + re.escape(start_marker) + r"\s*-->|//\s*" + re.escape(start_marker)
+        + r"|/\*\s*" + re.escape(start_marker) + r"\s*\*/)"
         r".*?"
-        r"(<!--\s*" + re.escape(end_marker) + r"\s*-->|//\s*" + re.escape(end_marker) + r")",
+        r"(<!--\s*" + re.escape(end_marker) + r"\s*-->|//\s*" + re.escape(end_marker)
+        + r"|/\*\s*" + re.escape(end_marker) + r"\s*\*/)",
         re.DOTALL,
     )
     stripped, n = pattern.subn("", html)
@@ -415,11 +417,10 @@ def main():
 
     min_ts, max_ts = get_timeline_bounds(conn)
     print(f"Zeitachse: {min_ts} bis {max_ts} ({(max_ts - min_ts).total_seconds() / 3600:.1f}h)")
-    if args.public:
-        print("--public: überspringe Positions-Historie (keine GPS-Rohdaten im Public-Build)")
-        position_history = {}
-    else:
-        position_history = build_position_history(conn, min_ts)
+    # Historische Positions-Wiedergabe ist auch im --public-Build enthalten
+    # (bewusste Entscheidung, siehe README "Hinweis zur Live-Datenquelle") —
+    # nur die LIVE-Verfolgung (Verbindung zur externen Quelle) wird entfernt.
+    position_history = build_position_history(conn, min_ts)
 
     route_short_to_id = gtfs.route_id_by_short_name
     route_id_to_short = {v: k for k, v in route_short_to_id.items()}
@@ -541,8 +542,8 @@ def main():
     html = html.replace("__LIVE_SSE_URL__", LIVE_SOURCE_URL)
     if args.public:
         html = strip_marked_block(html, "LIVE_SECTION_START", "LIVE_SECTION_END")
-        html = strip_marked_block(html, "POSITION_LEGEND_START", "POSITION_LEGEND_END")
-        html = strip_marked_block(html, "POSITION_TEXT_START", "POSITION_TEXT_END")
+        html = strip_marked_block(html, "LIVE_LEGEND_START", "LIVE_LEGEND_END")
+        html = strip_marked_block(html, "LIVE_CSS_START", "LIVE_CSS_END")
         html = strip_marked_block(html, "LIVE_JS_START", "LIVE_JS_END")
         out_path = PUBLIC_OUT_FILE
     else:
@@ -598,8 +599,10 @@ TEMPLATE = r"""<!DOCTYPE html>
     border-radius:50%; background:#ffb703; color:#1c2733; border:1px solid #7a5200; flex-shrink:0;
   }
   .legend-bus { width:18px; text-align:center; flex-shrink:0; }
+  /* LIVE_CSS_START */
   #liveToggle.live-active { background:#c62828; border-color:#c62828; color:#fff; }
   #liveToggle.live-active .live-dot { color:#ffb3b3; }
+  /* LIVE_CSS_END */
   .live-bus-icon {
     width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;
     font-size:13px; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.6);
@@ -698,10 +701,10 @@ TEMPLATE = r"""<!DOCTYPE html>
       <div class="legend-row"><span class="legend-dot" style="background:#aaa"></span> keine Daten zu dieser Stunde</div>
       <div class="legend-row" id="dwellLegendRow"><span class="legend-corona"></span> Standzeit &ge; <span id="dwellThreshLabel">5</span> Min. beobachtet</div>
       <div class="legend-row"><span class="legend-pantograph">&#9889;</span> bekannter Pantograph-Standort</div>
-      <!-- POSITION_LEGEND_START -->
+      <!-- LIVE_LEGEND_START -->
       <div class="legend-row"><span class="legend-bus">&#128652;</span> Live-Busposition (bei aktiver Live-Verfolgung)</div>
+      <!-- LIVE_LEGEND_END -->
       <div class="legend-row"><span class="legend-bus hist">&#128652;</span> Busposition zum Zeitschieber-Zeitpunkt (aus Logger-Daten)</div>
-      <!-- POSITION_LEGEND_END -->
     </div>
 
     <div id="generated"></div>

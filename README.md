@@ -15,6 +15,9 @@ Karte darstellt.
 - Haltestellen eingefärbt grün→gelb→rot nach durchschnittlicher Verspätung
   zum per Zeitschieber gewählten Zeitpunkt (30-Sekunden-Auflösung,
   abspielbar mit einstellbarer Geschwindigkeit)
+- Busposition zum gewählten Zeitpunkt aus den historisch geloggten Daten
+  des Testzeitraums (gestrichelter Marker) — **keine Live-Verbindung**,
+  siehe Hinweis unten
 - Blaue Corona-Markierung an Haltestellen mit auffälliger Standzeit
   (≥5/≥10 Min., umschaltbar)
 - Markierung des bekannten Pantograph-Ladestandorts (E-Bus-Schnellladung)
