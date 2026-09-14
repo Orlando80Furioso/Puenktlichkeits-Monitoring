@@ -16,12 +16,15 @@ Karte darstellt.
   zum per Zeitschieber gewählten Zeitpunkt (30-Sekunden-Auflösung,
   abspielbar mit einstellbarer Geschwindigkeit)
 - Busposition zum gewählten Zeitpunkt aus den historisch geloggten Daten
-  des Testzeitraums (gestrichelter Marker) — **keine Live-Verbindung**,
-  siehe Hinweis unten
+  des Testzeitraums (gestrichelter Marker, inkl. Verspätungs-Badge in
+  Minuten) — **keine Live-Verbindung**, siehe Hinweis unten
 - Blaue Corona-Markierung an Haltestellen mit auffälliger Standzeit
   (≥5/≥10 Min., umschaltbar)
 - Markierung des bekannten Pantograph-Ladestandorts (E-Bus-Schnellladung)
 - Responsive Layout für Desktop und Mobile
+- **[Tabellarische Auswertung](tabellen.html)**: sortierbare Tabellen zu
+  Pünktlichkeit je Linie, je Linie+Fahrzeug, und Haltestellen mit
+  auffälliger Standzeit (≥5/≥10 Min.)
 
 ## Technischer Hintergrund
 

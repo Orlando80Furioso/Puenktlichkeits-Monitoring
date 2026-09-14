@@ -383,6 +383,29 @@ def build_position_history(conn, min_ts: datetime) -> dict:
     return dict(history)
 
 
+def build_delay_history(conn, min_ts: datetime) -> dict:
+    """Baut je Fahrzeug eine zeitlich sortierte Liste (Zeit-Offset,
+    Verspätung in Minuten) aus der `matches`-Tabelle — genutzt, um am
+    Bus-Symbol die zuletzt bekannte Verspätung anzuzeigen (JS sucht sich
+    per Zeitschieber-Position den nächstgelegenen zurückliegenden Wert,
+    analog zu build_position_history)."""
+    cur = conn.execute(
+        """
+        SELECT r.vehicle, m.actual_time, m.delay_seconds
+        FROM matches m JOIN raw_events r ON r.id = m.raw_event_id
+        WHERE m.actual_time IS NOT NULL
+        ORDER BY r.vehicle, m.actual_time
+        """
+    )
+    history = defaultdict(list)
+    for vehicle, actual_time, delay_seconds in cur:
+        dt = datetime.strptime(actual_time, "%Y-%m-%d %H:%M:%S")
+        offset = round((dt - min_ts).total_seconds())
+        history[vehicle].append([offset, round(delay_seconds / 60.0, 1)])
+    print(f"Verspätungs-Historie: {sum(len(v) for v in history.values())} Werte über {len(history)} Fahrzeuge")
+    return dict(history)
+
+
 def strip_marked_block(html: str, start_marker: str, end_marker: str) -> str:
     """Entfernt einen mit `// START`/`// END`- bzw. `<!-- START -->`/
     `<!-- END -->`-Kommentaren markierten Abschnitt (inkl. der Marker
@@ -421,6 +444,7 @@ def main():
     # (bewusste Entscheidung, siehe README "Hinweis zur Live-Datenquelle") —
     # nur die LIVE-Verfolgung (Verbindung zur externen Quelle) wird entfernt.
     position_history = build_position_history(conn, min_ts)
+    delay_history = build_delay_history(conn, min_ts)
 
     route_short_to_id = gtfs.route_id_by_short_name
     route_id_to_short = {v: k for k, v in route_short_to_id.items()}
@@ -530,6 +554,7 @@ def main():
         "timeline_min_iso": min_ts.strftime("%Y-%m-%dT%H:%M:%S"),
         "timeline_max_offset": int((max_ts - min_ts).total_seconds()),
         "position_history": position_history,
+        "delay_history": delay_history,
         "generated_at": conn.execute("SELECT datetime('now')").fetchone()[0] + " UTC",
     }
 
@@ -611,6 +636,11 @@ TEMPLATE = r"""<!DOCTYPE html>
     width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center;
     font-size:12px; border:2px dashed #fff; box-shadow:0 1px 3px rgba(0,0,0,.6); opacity:0.9;
   }
+  .hist-bus-delay {
+    position:absolute; bottom:-7px; right:-9px; min-width:16px; height:14px; padding:0 2px;
+    border-radius:7px; color:#fff; font-size:10px; font-weight:600; line-height:14px; text-align:center;
+    border:1px solid #fff; box-shadow:0 1px 2px rgba(0,0,0,.6);
+  }
   .legend-bus.hist { opacity:0.9; }
   .leaflet-popup-content { font-size:13px; }
   .btnrow { display:flex; gap:6px; margin-top:6px; }
@@ -639,6 +669,7 @@ TEMPLATE = r"""<!DOCTYPE html>
   <div id="sidebar">
     <h1>NEW Pünktlichkeits-Monitoring</h1>
     <div class="sub">Proof of Concept &middot; nicht offiziell, siehe README</div>
+    <div class="sub" style="margin-top:4px;"><a href="tabellen.html" style="color:#8ab4ff;">&#8594; Tabellarische Auswertung</a></div>
 
     <div class="section">
       <h2>Zeitpunkt (aufgezeichnet)</h2>
@@ -705,6 +736,7 @@ TEMPLATE = r"""<!DOCTYPE html>
       <div class="legend-row"><span class="legend-bus">&#128652;</span> Live-Busposition (bei aktiver Live-Verfolgung)</div>
       <!-- LIVE_LEGEND_END -->
       <div class="legend-row"><span class="legend-bus hist">&#128652;</span> Busposition zum Zeitschieber-Zeitpunkt (aus Logger-Daten)</div>
+      <div class="legend-row"><span style="display:inline-flex;gap:3px;"><span style="background:#2e7d32;color:#fff;border-radius:7px;padding:0 4px;font-size:10px;">+1</span><span style="background:#c62828;color:#fff;border-radius:7px;padding:0 4px;font-size:10px;">+7</span></span> Zahl am Bus-Symbol = zuletzt bekannte Verspätung (Min.)</div>
     </div>
 
     <div id="generated"></div>
@@ -769,6 +801,27 @@ function findPositionAt(vehicle, absSeconds) {
   return { lat, lon, route, offset };
 }
 
+function findDelayAt(vehicle, absSeconds) {
+  const points = DATA.delay_history[vehicle];
+  if (!points || points.length === 0) return null;
+  let lo = 0, hi = points.length - 1, result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid][0] <= absSeconds) { result = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  if (result === -1) return null;
+  const [offset, delayMin] = points[result];
+  if (absSeconds - offset > DATA.position_stale_seconds) return null; // zu alter Messwert -> nicht mehr anzeigen
+  return delayMin;
+}
+
+function delayBadgeColor(delayMin) {
+  if (delayMin <= 1) return "#2e7d32";   // gruen: puenktlich
+  if (delayMin <= 4) return "#e0a800";   // gelb: leicht verspaetet
+  return "#c62828";                       // rot: deutlich verspaetet
+}
+
 function renderHistoricalBuses(absSeconds) {
   const seen = new Set();
   for (const vehicle of Object.keys(DATA.position_history)) {
@@ -776,15 +829,26 @@ function renderHistoricalBuses(absSeconds) {
     if (!pos || !checked[pos.route]) continue;
     seen.add(vehicle);
 
+    const delay = findDelayAt(vehicle, absSeconds);
     const color = (DATA.lines[pos.route] || {}).color || '#333';
+    const delayHtml = delay !== null
+      ? `<div class="hist-bus-delay" style="background:${delayBadgeColor(delay)}">${delay > 0 ? '+' : ''}${Math.round(delay)}</div>`
+      : "";
     const icon = L.divIcon({
       className: "",
-      html: `<div class="hist-bus-icon" style="background:${color}">&#128652;</div>`,
+      html: `<div style="position:relative;width:20px;height:20px;">
+               <div class="hist-bus-icon" style="background:${color}">&#128652;</div>
+               ${delayHtml}
+             </div>`,
       iconSize: [20, 20],
       iconAnchor: [10, 10],
     });
+    const delayInfo = delay !== null
+      ? `<br>Letzte bekannte Verspätung: ${delay > 0 ? '+' : ''}${delay.toFixed(1)} Min.`
+      : "<br>Keine aktuelle Verspätungsangabe";
     const popup = `<b>Fahrzeug ${vehicle}</b> &middot; Linie ${pos.route}<br>` +
-      `Letzte bekannte Position: ${formatDateLabel(slotToDate(Math.floor(pos.offset / DATA.position_step_seconds)))}`;
+      `Letzte bekannte Position: ${formatDateLabel(slotToDate(Math.floor(pos.offset / DATA.position_step_seconds)))}` +
+      delayInfo;
 
     if (historicalVehicleMarkers[vehicle]) {
       historicalVehicleMarkers[vehicle].setLatLng([pos.lat, pos.lon]);
@@ -1058,7 +1122,6 @@ let liveActive = false; // von Linien-Checkboxen abgefragt, daher außerhalb des
 const LIVE_SSE_URL = "__LIVE_SSE_URL__"; // aus config.py eingesetzt, nicht im Quellcode hartkodiert (siehe README "Veröffentlichung")
 
 let liveSource = null;
-let liveActive = false;
 let liveRoot = {};
 let liveVehicleMarkers = {};
 
